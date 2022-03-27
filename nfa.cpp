@@ -16,3 +16,4 @@ nfa* makeNFA() {
 	}
 	return n;
 }
+

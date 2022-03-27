@@ -7,7 +7,6 @@ from imp import init_builtin
 from mimetypes import init
 import re
 
-from pyparsing import alphas8bit
 
 alphabet = "qwertyuiopasdfghjklzxcvbnm" + "qwertyuiopasdfghjklzxcvbnm".upper() + "123456789"
 class Node:
@@ -41,15 +40,16 @@ def regex_to_NFA(expression : str) -> tuple:
         paths = [regex_to_NFA(x) for x in units ]
         initial = Node()
         final = Node()
-        for head,tail in paths: #  say paths are ABC and DEF then initial -> ABC and initial ->DEF
+        for head,tail,i in paths: #  say paths are ABC and DEF then initial -> ABC and initial ->DEF
             join(initial, head)
             join(tail, final)
         #        /> path 2 \>
         #initial -> path 1 -> final
         #        \> path 0 />
-        return (initial, final)
+        
 
-
+    elif "*" in expression and not any ([ x in expression for x in "()"]):
+        pass
 
 
 
@@ -99,6 +99,6 @@ def join(host : Node, graft : Node) -> Node:
 #join(tail1,head2)
 #printNFA(head1,set())
 
-expression3 = "abc|def"
+expression3 = "abc|def|ghi"
 head3, tail3 = regex_to_NFA(expression3)
 printNFA(head3, set())
