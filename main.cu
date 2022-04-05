@@ -7,7 +7,8 @@
 
 #include "dfa.h"
 #include "nfa.h"
-
+#include "nfa_loader.h"
+#include "book_loader.h"
 
 __global__ void addi(int* x, int* y, int* z) {
 
@@ -284,6 +285,11 @@ int main()
 	float memoryTime = 1;
 	float computeTime;
 	launchNFA(n, str, strlen(str), 1, 1, &memoryTime, &computeTime);
+
+	std::string s = loadBook("D:/CUDFA/CUDFA/x64/Debug/romeo_and_juliet.txt");
+	std::string* s2 = &s;
+	int char_count;
+	char* book = processBook(s2, &char_count);
 	getchar();
 	return 0;
 }
