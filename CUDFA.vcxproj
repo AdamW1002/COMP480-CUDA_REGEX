@@ -82,12 +82,14 @@
   <ItemGroup>
     <ClInclude Include="book_loader.h" />
     <ClInclude Include="dfa.h" />
+    <ClInclude Include="infant.h" />
     <ClInclude Include="nfa.h" />
     <ClInclude Include="nfa_loader.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="book_loader.cpp" />
     <ClCompile Include="dfa.cpp" />
+    <ClCompile Include="infant.cpp" />
     <ClCompile Include="nfa.cpp" />
     <ClCompile Include="nfa_loader.cpp" />
   </ItemGroup>

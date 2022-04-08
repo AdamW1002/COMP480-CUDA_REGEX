@@ -1,6 +1,10 @@
 ﻿
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
+#ifndef __CUDACC__
+#define __CUDACC__
+#include <device_functions.h>
+#endif
 
 #include <stdio.h>
 #include<iostream>
@@ -9,6 +13,7 @@
 #include "nfa.h"
 #include "nfa_loader.h"
 #include "book_loader.h"
+#include "infant.h"
 
 __global__ void addi(int* x, int* y, int* z) {
 
@@ -207,10 +212,109 @@ void launchNFA(nfa* n, char* str, int len, int blocks, int threadsPerBlock, floa
 	cudaFree(dev_str);
 	cudaFree(dev_nfa);
 }
- 
+
+__global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength, char* active, char* next) {
+	//active and future are both assumed to be nfa state sized
+	char* current = active;
+	char* future = next;
+
+	for(int i = 0; i < bookLength; i++){
+	//start in a block given by index and go by block width
+		char c = book[i];
+
+		for (int j = threadIdx.x; j < MAX_STATES; j += blockDim.x) {
+			//So here we have 2 state IDs stored together and they're each 16 bits and stored in one 32 bit int
+			// the lower 16 are the start and the upper 16 are the end
+			// So we get a pointer to that int and then use short pointers to the top and bottom to get the states
+			
+			
+			short* startState;
+			short* endState;
+			
+			int* transition = &(nfa->transitions[c][j]);
+
+			startState = ((short*)transition);
+			endState = ((short*)transition) + 1;
+
+			if (current[*startState] != 0) { //if current state in transition is active then future is active
+				future[*endState] = 1;
+			}
+
+	
+		}
+		__syncthreads();
+	
+	}
+
+}
+
+void runInfant(INFANT* nfa, char* book, int bookLength, float* memoryTime, float* computationTime) {
+	int firsts[NFA_CHARS];
+	for (int i = 0; i < NFA_CHARS; i++) {
+		firsts[i] = nfa->transitions[i][0]; //copy first transitions to a list of first transitions
+	}
+
+	char* dev_str = nullptr;
+	INFANT* dev_nfa = nullptr;
+
+
+
+	cudaEvent_t memoryStart, memoryStop; //track memory
+	cudaEventCreate(&memoryStart);
+	cudaEventCreate(&memoryStop);
+
+
+	cudaEvent_t computeStart, computeStop; //track compute
+	cudaEventCreate(&computeStart);
+	cudaEventCreate(&computeStop);
+
+	cudaMalloc((void**)& dev_nfa, 1 * sizeof(INFANT)); //allocate device memory
+	cudaMalloc((void**)& dev_str, bookLength * sizeof(char));
+	cudaEventRecord(memoryStart); //record start of memory 
+
+	cudaMemcpy(dev_nfa, nfa, 1 * sizeof(INFANT), cudaMemcpyHostToDevice);
+	cudaMemcpy(dev_str, book, bookLength * sizeof(char), cudaMemcpyHostToDevice);
+
+	cudaEventRecord(memoryStop); //record end of memory stuff, use event synch to get correct time
+	cudaEventSynchronize(memoryStop);
+
+
+	//We use event sync instead of device sync because eveny sync will freeze the CPU thread just like device
+	// But with the added benefit freezing until the event recording, which is right after the kernel finishes
+
+
+	cudaEventRecord(computeStart); //same procedure for running NFA
+	//runNFAGPU << <blocks, threadsPerBlock >> > (dev_nfa, dev_str, len);
+	cudaEventRecord(computeStop);
+	cudaEventSynchronize(computeStop);
+
+
+	cudaEventElapsedTime(memoryTime, memoryStart, memoryStop); //see results
+	cudaEventElapsedTime(computationTime, computeStart, computeStop);
+
+	printf("Memory Took: %f ms\n", *memoryTime);
+	printf("Computation Took: %f ms\n", *computationTime);
+	//clean up
+	cudaFree(dev_str);
+	cudaFree(dev_nfa);
+
+
+}
+
 int main()
 {
 
+	std::string s = loadBook("D:/CUDFA/CUDFA/x64/Debug/romeo_and_juliet.txt");
+	std::string* s2 = &s;
+	int char_count;
+	char* book = processBook(s2, &char_count);
+
+
+
+	getchar();
+	return 0;
+
+	/**
 	int x[3] = { 1,2,3 };
 	int y[3] = { 4,5,6 };
 	int z[3] = { 0 };
@@ -284,14 +388,10 @@ int main()
 	runNFA(n, str, strlen(str));
 	float memoryTime = 1;
 	float computeTime;
-	launchNFA(n, str, strlen(str), 1, 1, &memoryTime, &computeTime);
+	launchNFA(n, str, strlen(str), 1, 1, &memoryTime, &computeTime); */
 
-	std::string s = loadBook("D:/CUDFA/CUDFA/x64/Debug/romeo_and_juliet.txt");
-	std::string* s2 = &s;
-	int char_count;
-	char* book = processBook(s2, &char_count);
-	getchar();
-	return 0;
+	
+	
 }
 
 
