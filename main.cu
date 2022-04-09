@@ -213,10 +213,9 @@ void launchNFA(nfa* n, char* str, int len, int blocks, int threadsPerBlock, floa
 	cudaFree(dev_nfa);
 }
 
-__global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength, char* active) {
+__global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength,  char* active, char* future) {
 	//active and future are both assumed to be nfa state sized
-	char* current = active;
-	char future[MAX_STATES];
+	
 
 	__shared__ int i;
 	i = 0;
@@ -227,7 +226,7 @@ __global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength, char* a
 		char c = book[i];
 		printf("i is %d according to thread %d and c is %c, bdx is %d \n", i, threadIdx.x,c, blockDim.x);
 		//TODO max states
-		for (int j = threadIdx.x; j < 5; j += blockDim.x) {
+		for (int j = threadIdx.x; j < nfa->maxTransitions[c-FIRST_CHAR]; j += blockDim.x) {
 			
 			//So here we have 2 state IDs stored together and they're each 16 bits and stored in one 32 bit int
 			// the lower 16 are the start and the upper 16 are the end
@@ -238,7 +237,7 @@ __global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength, char* a
 			short* endState;
 			
 			int* transition = &(nfa->transitions[c-FIRST_CHAR][j]);
-			printf("thread %d is looking at transition %x\n", threadIdx.x, *transition);
+			//printf("thread %d is looking at transition %.8x\n", threadIdx.x, *transition);
 			
 				
 				startState = ((short*)transition)+1; //the delights of endianess make you do this at least on my AMD machine
@@ -246,20 +245,21 @@ __global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength, char* a
 
 				int start = (int)(*startState);
 				int end = (int)(*endState);
-				if (start > 0 && end > 0) { //NFA GET MAX TRANSITION STATE
-				if (current[start] != 0) { //if current state in transition is active then future is active
+				//printf("before checking state current is { %d, %d} and future is {%d, %d}\n",(int) active[0], (int)active[1], (int)future[0], (int)future[1]);
+				if (active[start] != 0) { //if current state in transition is active then future is active
 					future[end] = 1;
-					if (j < 10) {
-						printf("in state %d with char %c moving to %d via transition %d in thread %d and i is %d\n", start, c, end, j, threadIdx.x ,i);
-					}
+					
+					//printf("in state %d with char %c moving to %d via transition %d in thread %d and i is %d\n", start, c, end, j, threadIdx.x ,i);
+					
 				}
-
-			}
+				//printf("after checking state current is { %d, %d} and future is {%d, %d}\n", (int)active[0], (int)active[1], (int)future[0], (int)future[1]);
+			
 		}
 		
-		for (int i = 0; i < MAX_STATES; i++) {
-			current[i] = future[i];
-			future[i] = 0;
+		__syncthreads();//copy future to current
+		for (int j = threadIdx.x; j < MAX_STATES; j+= blockDim.x){
+			active[j] = future[j];
+			future[j] = 0;
 		}
 	
 		
@@ -272,8 +272,10 @@ __global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength, char* a
 		__syncthreads();
 	}
 
-	for (int i = 0; i < 10; i++) {
-		printf("in state %d, with setting %d\n", i, active[i]);
+	if (threadIdx.x == 0) {
+		for (int i = 0; i < 10; i++) {
+			printf("in state %d, with setting %d\n", i, active[i]);
+		}
 	}
 
 
@@ -288,18 +290,25 @@ void runInfant(INFANT* nfa, char* book, int bookLength, float* memoryTime, float
 
 
 	int blocks = 1;
-	int threadsPerBlock = 2;
+	int threadsPerBlock = 1;
 
 	char* dev_book = nullptr;
 	INFANT* dev_nfa = nullptr;
 	
 
-	char states[MAX_STATES] = { 0 };
-	states[0] = 1;
+	char current_states[MAX_STATES] = { 0 };
+	current_states[0] = 1;
 
-	char* dev_states = nullptr; // allocate state array
-	cudaMalloc((void**)& dev_states, MAX_STATES * sizeof(char));
-	cudaMemcpy(dev_states, states, MAX_STATES * sizeof(char), cudaMemcpyHostToDevice);
+	char* dev_current_states = nullptr; // allocate state array
+	cudaMalloc((void**)& dev_current_states, MAX_STATES * sizeof(char));
+	cudaMemcpy(dev_current_states, current_states, MAX_STATES * sizeof(char), cudaMemcpyHostToDevice);
+
+	char future_states[MAX_STATES] = { 0 };
+	
+
+	char* dev_future_states = nullptr; // allocate state array
+	cudaMalloc((void**)& dev_future_states, MAX_STATES * sizeof(char));
+	cudaMemcpy(dev_future_states,future_states, MAX_STATES * sizeof(char), cudaMemcpyHostToDevice);
 
 
 	cudaEvent_t memoryStart, memoryStop; //track memory
@@ -329,7 +338,7 @@ void runInfant(INFANT* nfa, char* book, int bookLength, float* memoryTime, float
 
 	cudaEventRecord(computeStart); //same procedure for running NFA
 	//runNFAGPU << <blocks, threadsPerBlock >> > (dev_nfa, dev_str, len);
-	infantAlgorithm << <blocks, threadsPerBlock >> > (dev_nfa, dev_book, bookLength, dev_states);
+	infantAlgorithm << <blocks, threadsPerBlock >> > (dev_nfa, dev_book, bookLength, dev_current_states, dev_future_states);
 	cudaEventRecord(computeStop);
 	cudaEventSynchronize(computeStop);
 
@@ -342,6 +351,8 @@ void runInfant(INFANT* nfa, char* book, int bookLength, float* memoryTime, float
 	//clean up
 	cudaFree(dev_book);
 	cudaFree(dev_nfa);
+	cudaFree(dev_current_states);
+	cudaFree(dev_future_states);
 
 
 }
@@ -357,12 +368,35 @@ int main()
 	iNFAnt* nfa = getiNFAnt();
 	nfa->transitions['a' - FIRST_CHAR][0] = 0x00000000; //loop from 0 to 0 when you see a
 	nfa->transitions['a' - FIRST_CHAR][1] = 0x00010000; // when you see a at state 1 go to 0
+
 	nfa->transitions['b' - FIRST_CHAR][0] = 0x00010001; // when you see b at state 1 loop
 	nfa->transitions['b' - FIRST_CHAR][1] = 0x00000001; // when you see b at state 0 go to state 1
-	char* str = "aba";
+	nfa->transitions['b' - FIRST_CHAR][2] = 0x00020001; // when you see b at state 2 go state 1
+
+	nfa->transitions['c' - FIRST_CHAR][0] = 0x00020002; // when you see b at state 2 loop
+	nfa->transitions['c' - FIRST_CHAR][1] = 0x00000002; // when you see b at state 0 go to state 2
+	nfa->transitions['c' - FIRST_CHAR][2] = 0x00010002;  // c at state 1 means go to state 2
+
+
+	nfa->maxTransitions['a' - FIRST_CHAR] = 2;
+	nfa->maxTransitions['b' - FIRST_CHAR] = 3;
+	nfa->maxTransitions['c' - FIRST_CHAR] = 3;
+
+	char* str = "abaaaabc";
+
+	iNFAnt* nfa2 = getiNFAnt();
+
+	//romeos goes from 0 to 5
+	nfa2->transitions['r' - FIRST_CHAR][0] = 0x00000001; // r means 0 to 1
+	nfa2->transitions['o' - FIRST_CHAR][0] = 0x00010002;
+	nfa2->transitions['m' - FIRST_CHAR][0] = 0x00020003;
+	nfa2->transitions['e' - FIRST_CHAR][0] = 0x00030004;
+	nfa2->transitions['o' - FIRST_CHAR][1] = 0x00040005;
+
 	float memoryTime;
 	float computationTime;
-	runInfant(nfa, str, strlen(str), &memoryTime, &computationTime);
+	char* st = "romeo";
+	runInfant(nfa2, st, strlen(st), &memoryTime, &computationTime);
 
 
 

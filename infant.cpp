@@ -11,7 +11,7 @@ iNFAnt* getiNFAnt()
 		return NULL;
 	}
 
-	memset(infant->transitions, -1, NFA_CHARS * MAX_STATES * sizeof(int)); //0 out the nfa
+	memset(infant, 0, 1 * sizeof(infant)); //0 out the nfa
 
 	return infant;
 
