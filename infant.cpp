@@ -12,7 +12,22 @@ iNFAnt* getiNFAnt()
 	}
 
 	memset(infant, 0, 1 * sizeof(infant)); //0 out the nfa
-
+	memset(infant->maxTransitions, 0, NFA_CHARS * sizeof(int));
+	//memset(infant->transitions, 0, NFA_CHARS *  MAX_STATES * sizeof(int));
+	memset(infant->selfLoops, 0, MAX_STATES * sizeof(char));
 	return infant;
 
 }
+
+void addTransition(iNFAnt* nfa, char c, short start, short end)
+{
+	short arr[2] = { end, start }; //array and pointer trick to form int from two shorts
+	int* i = (int*)arr;
+
+
+	nfa->transitions[c - FIRST_CHAR][nfa->maxTransitions[c - FIRST_CHAR]] = *i; //add transition and then denote that maxtransitions increases
+	nfa->maxTransitions[c - FIRST_CHAR]++;
+
+
+}
+

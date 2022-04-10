@@ -10,9 +10,10 @@ typedef struct INFANT {
 
 	int transitions[NFA_CHARS][MAX_STATES]; //look up char first then choose from 65536 states per infant paper also each int is a pair of 2 16 bit numbers
 	short  acceptStates[MAX_STATES];
-	int selfLoops[MAX_STATES]; //ancillary array of self loop states
+	char selfLoops[MAX_STATES]; //ancillary array of self loop states
 	int maxTransitions[NFA_CHARS]; //record index of highest transition
 
 } iNFAnt;
 
-iNFAnt* getiNFAnt();
+iNFAnt* getiNFAnt(); //get an infant pre aloocated
+void addTransition(iNFAnt* nfa,char c, short start, short end); //add a transition and avoid a mess

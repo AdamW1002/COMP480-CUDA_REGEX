@@ -259,6 +259,7 @@ __global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength,  char* 
 		__syncthreads();//copy future to current
 		for (int j = threadIdx.x; j < MAX_STATES; j+= blockDim.x){
 			active[j] = future[j];
+			active[j] = active[j] | nfa->selfLoops[j]; //if in self loop continue to run
 			future[j] = 0;
 		}
 	
@@ -273,7 +274,7 @@ __global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength,  char* 
 	}
 
 	if (threadIdx.x == 0) {
-		for (int i = 0; i < 10; i++) {
+		for (int i = 0; i < 15; i++) {
 			printf("in state %d, with setting %d\n", i, active[i]);
 		}
 	}
@@ -290,7 +291,7 @@ void runInfant(INFANT* nfa, char* book, int bookLength, float* memoryTime, float
 
 
 	int blocks = 1;
-	int threadsPerBlock = 1;
+	int threadsPerBlock = 2;
 
 	char* dev_book = nullptr;
 	INFANT* dev_nfa = nullptr;
@@ -366,37 +367,55 @@ int main()
 	char* book = processBook(s2, &char_count);
 
 	iNFAnt* nfa = getiNFAnt();
-	nfa->transitions['a' - FIRST_CHAR][0] = 0x00000000; //loop from 0 to 0 when you see a
-	nfa->transitions['a' - FIRST_CHAR][1] = 0x00010000; // when you see a at state 1 go to 0
-
-	nfa->transitions['b' - FIRST_CHAR][0] = 0x00010001; // when you see b at state 1 loop
-	nfa->transitions['b' - FIRST_CHAR][1] = 0x00000001; // when you see b at state 0 go to state 1
-	nfa->transitions['b' - FIRST_CHAR][2] = 0x00020001; // when you see b at state 2 go state 1
-
-	nfa->transitions['c' - FIRST_CHAR][0] = 0x00020002; // when you see b at state 2 loop
-	nfa->transitions['c' - FIRST_CHAR][1] = 0x00000002; // when you see b at state 0 go to state 2
-	nfa->transitions['c' - FIRST_CHAR][2] = 0x00010002;  // c at state 1 means go to state 2
+	
+	addTransition(nfa, 'a', 0, 0); //loop from 0 
+	addTransition(nfa, 'a', 1, 0); //from accept states move to reject when you see a
+	addTransition(nfa, 'a', 2, 0); //from accept states move to reject when you see a
+	
 
 
-	nfa->maxTransitions['a' - FIRST_CHAR] = 2;
-	nfa->maxTransitions['b' - FIRST_CHAR] = 3;
-	nfa->maxTransitions['c' - FIRST_CHAR] = 3;
+	addTransition(nfa, 'b', 1, 1); //jump between accept states 
+	addTransition(nfa, 'b', 0, 1); //move to accept from sta
+	addTransition(nfa, 'b', 2, 1); //jump between accept states
+	
+	addTransition(nfa, 'c', 2, 2); //jump between accept states 
+	addTransition(nfa, 'c', 0, 2); //move to accept from sta
+	addTransition(nfa, 'c', 1, 2); //jump between accept states
+	//nfa->transitions['c' - FIRST_CHAR][0] = 0x00020002; // when you see b at state 2 loop
+	//nfa->transitions['c' - FIRST_CHAR][1] = 0x00000002; // when you see b at state 0 go to state 2
+	//nfa->transitions['c' - FIRST_CHAR][2] = 0x00010002;  // c at state 1 means go to state 2
+
+
+	//nfa->maxTransitions['a' - FIRST_CHAR] = 2;
+	//nfa->maxTransitions['b' - FIRST_CHAR] = 3;
+	//nfa->maxTransitions['c' - FIRST_CHAR] = 3;
 
 	char* str = "abaaaabc";
 
 	iNFAnt* nfa2 = getiNFAnt();
 
 	//romeos goes from 0 to 5
-	nfa2->transitions['r' - FIRST_CHAR][0] = 0x00000001; // r means 0 to 1
-	nfa2->transitions['o' - FIRST_CHAR][0] = 0x00010002;
-	nfa2->transitions['m' - FIRST_CHAR][0] = 0x00020003;
-	nfa2->transitions['e' - FIRST_CHAR][0] = 0x00030004;
-	nfa2->transitions['o' - FIRST_CHAR][1] = 0x00040005;
+	addTransition(nfa2, 'r', 0, 1);
+	addTransition(nfa2, 'o', 1, 2);
+	addTransition(nfa2, 'm', 2, 3);
+	addTransition(nfa2, 'e', 3, 4);
+	addTransition(nfa2, 'o', 4, 5);
+
+	addTransition(nfa2, 'j', 0, 6);
+	addTransition(nfa2, 'u', 6, 7);
+	addTransition(nfa2, 'l', 7, 8);
+	addTransition(nfa2, 'i', 8, 9);
+	addTransition(nfa2, 'e', 9, 10);
+	addTransition(nfa2, 't', 10, 11);
+	
+
+	nfa2->selfLoops[0] = 1; // self loop in first state
 
 	float memoryTime;
 	float computationTime;
-	char* st = "romeo";
+	char* st = "romeo and juliet";
 	runInfant(nfa2, st, strlen(st), &memoryTime, &computationTime);
+	runInfant(nfa, str, strlen(str), &memoryTime, &computationTime);
 
 
 
