@@ -12,6 +12,7 @@ typedef struct INFANT {
 	short  acceptStates[MAX_STATES];
 	char selfLoops[MAX_STATES]; //ancillary array of self loop states
 	int maxTransitions[NFA_CHARS]; //record index of highest transition
+	short maxState; //highest state reached by nfa
 
 } iNFAnt;
 

@@ -213,7 +213,7 @@ void launchNFA(nfa* n, char* str, int len, int blocks, int threadsPerBlock, floa
 	cudaFree(dev_nfa);
 }
 
-__global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength,  char* active, char* future) {
+__global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength,  char* active, char* future, int* acceptCounts) {
 	//active and future are both assumed to be nfa state sized
 	
 
@@ -224,7 +224,7 @@ __global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength,  char* 
 	while (i < bookLength){
 	//start in a block given by index and go by block width
 		char c = book[i];
-		printf("i is %d according to thread %d and c is %c, bdx is %d \n", i, threadIdx.x,c, blockDim.x);
+		//printf("i is %d according to thread %d and c is %c, bdx is %d \n", i, threadIdx.x,c, blockDim.x);
 		//TODO max states
 		for (int j = threadIdx.x; j < nfa->maxTransitions[c-FIRST_CHAR]; j += blockDim.x) {
 			
@@ -249,6 +249,7 @@ __global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength,  char* 
 				if (active[start] != 0) { //if current state in transition is active then future is active
 					future[end] = 1;
 					
+					
 					//printf("in state %d with char %c moving to %d via transition %d in thread %d and i is %d\n", start, c, end, j, threadIdx.x ,i);
 					
 				}
@@ -257,9 +258,15 @@ __global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength,  char* 
 		}
 		
 		__syncthreads();//copy future to current
-		for (int j = threadIdx.x; j < MAX_STATES; j+= blockDim.x){
+		for (int j = threadIdx.x; j <=nfa->maxState; j+= blockDim.x){
 			active[j] = future[j];
 			active[j] = active[j] | nfa->selfLoops[j]; //if in self loop continue to run
+			
+			//if (nfa->acceptStates[j] == 1 && active[j] != 0) { //if going to be in accpet state count it
+			//	acceptCounts[j] = acceptCounts[j] + 1;
+			//	
+			//}
+			acceptCounts[j] += nfa->acceptStates[j] == 1 && active[j] != 0;
 			future[j] = 0;
 		}
 	
@@ -277,6 +284,10 @@ __global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength,  char* 
 		for (int i = 0; i < 15; i++) {
 			printf("in state %d, with setting %d\n", i, active[i]);
 		}
+		for (int i = 0; i < 15; i++) {
+			printf("state %d active count is %d\n", i, acceptCounts[i]);
+		}
+
 	}
 
 
@@ -291,11 +302,16 @@ void runInfant(INFANT* nfa, char* book, int bookLength, float* memoryTime, float
 
 
 	int blocks = 1;
-	int threadsPerBlock = 2;
+	int threadsPerBlock = 32;
 
 	char* dev_book = nullptr;
 	INFANT* dev_nfa = nullptr;
 	
+
+	int* dev_counts = nullptr; //allocate active counter
+	cudaMalloc((void**)& dev_counts, 15 * sizeof(int));
+	cudaMemset(dev_counts, 0,15 * sizeof(int));
+
 
 	char current_states[MAX_STATES] = { 0 };
 	current_states[0] = 1;
@@ -339,7 +355,7 @@ void runInfant(INFANT* nfa, char* book, int bookLength, float* memoryTime, float
 
 	cudaEventRecord(computeStart); //same procedure for running NFA
 	//runNFAGPU << <blocks, threadsPerBlock >> > (dev_nfa, dev_str, len);
-	infantAlgorithm << <blocks, threadsPerBlock >> > (dev_nfa, dev_book, bookLength, dev_current_states, dev_future_states);
+	infantAlgorithm << <blocks, threadsPerBlock >> > (dev_nfa, dev_book, bookLength, dev_current_states, dev_future_states, dev_counts);
 	cudaEventRecord(computeStop);
 	cudaEventSynchronize(computeStop);
 
@@ -400,6 +416,8 @@ int main()
 	addTransition(nfa2, 'm', 2, 3);
 	addTransition(nfa2, 'e', 3, 4);
 	addTransition(nfa2, 'o', 4, 5);
+	
+	addTransition(nfa2, 'R', 0, 1);
 
 	addTransition(nfa2, 'j', 0, 6);
 	addTransition(nfa2, 'u', 6, 7);
@@ -407,15 +425,19 @@ int main()
 	addTransition(nfa2, 'i', 8, 9);
 	addTransition(nfa2, 'e', 9, 10);
 	addTransition(nfa2, 't', 10, 11);
-	
+	addTransition(nfa2, 'J', 0, 6);
 
 	nfa2->selfLoops[0] = 1; // self loop in first state
 
+	nfa2->acceptStates[5] = 1;
+	nfa2->acceptStates[11]  = 1;
+
 	float memoryTime;
 	float computationTime;
-	char* st = "romeo and juliet";
-	runInfant(nfa2, st, strlen(st), &memoryTime, &computationTime);
-	runInfant(nfa, str, strlen(str), &memoryTime, &computationTime);
+	char* st = "romeo and juliet died";
+	//runInfant(nfa2, st, strlen(st), &memoryTime, &computationTime);
+	runInfant(nfa2, book, char_count, &memoryTime, &computationTime);
+	//runInfant(nfa, str, strlen(str), &memoryTime, &computationTime);
 
 
 
