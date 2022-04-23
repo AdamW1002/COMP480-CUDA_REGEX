@@ -18,3 +18,7 @@ typedef struct INFANT {
 
 iNFAnt* getiNFAnt(); //get an infant pre aloocated
 void addTransition(iNFAnt* nfa,char c, short start, short end); //add a transition and avoid a mess
+void addString(iNFAnt* nfa, char* str, int start); //add a string to our NFA
+void addEpsilon(iNFAnt* nfa, int start,int  end); //add epsilon transition from start to end
+int addEpsilonString(iNFAnt* nfa, int start, int  count);
+void addGroupOfMany(iNFAnt* nfa, int start, int min, int max, int* end);

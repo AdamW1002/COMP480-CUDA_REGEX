@@ -213,12 +213,21 @@ void launchNFA(nfa* n, char* str, int len, int blocks, int threadsPerBlock, floa
 	cudaFree(dev_nfa);
 }
 
-__global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength,  char* active, char* future, int* acceptCounts) {
+__global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength, char* active, char* future, int* acceptCounts) {
 	//active and future are both assumed to be nfa state sized
-	
+
 
 	__shared__ int i;
 	i = 0;
+	__shared__ char selfLoop[256];
+	if (nfa->maxState <= 256)
+	{
+		for (int i = threadIdx.x; i <= nfa->maxState; i += blockDim.x) {
+		
+			selfLoop[i] = book[i];
+		}
+	}
+
 
 	//for(int i = 0; i < bookLength; i++){
 	while (i < bookLength){
@@ -235,8 +244,8 @@ __global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength,  char* 
 			
 			short* startState;
 			short* endState;
-			
-			int* transition = &(nfa->transitions[c-FIRST_CHAR][j]);
+			//load as int and instead shift+mask
+			/**int* transition = &(nfa->transitions[c-FIRST_CHAR][j]);
 			//printf("thread %d is looking at transition %.8x\n", threadIdx.x, *transition);
 			
 				
@@ -244,7 +253,10 @@ __global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength,  char* 
 				endState = ((short*)transition);
 
 				int start = (int)(*startState);
-				int end = (int)(*endState);
+				int end = (int)(*endState);**/
+				int transition = (nfa->transitions[c - FIRST_CHAR][j]); //use bitshifts to decompose intger into high and low bits
+				int start = (transition & 0xFFFF0000) >> 16;
+				int end = (transition & 0x0000FFFF);
 				//printf("before checking state current is { %d, %d} and future is {%d, %d}\n",(int) active[0], (int)active[1], (int)future[0], (int)future[1]);
 				if (active[start] != 0) { //if current state in transition is active then future is active
 					future[end] = 1;
@@ -257,11 +269,17 @@ __global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength,  char* 
 			
 		}
 		
+
+		//make sure future is totally done
 		__syncthreads();//copy future to current
 		for (int j = threadIdx.x; j <=nfa->maxState; j+= blockDim.x){
 			active[j] = future[j];
-			active[j] = active[j] | nfa->selfLoops[j]; //if in self loop continue to run
-			
+			//if (nfa->maxState <= 256) {
+			//	active[j] = active[j] | selfLoop[j];
+			//}
+			//else {
+				active[j] = active[j] | nfa->selfLoops[j]; //if in self loop continue to run
+			//}
 			//if (nfa->acceptStates[j] == 1 && active[j] != 0) { //if going to be in accpet state count it
 			//	acceptCounts[j] = acceptCounts[j] + 1;
 			//	
@@ -271,47 +289,48 @@ __global__ void infantAlgorithm(INFANT* nfa, char* book, int bookLength,  char* 
 		}
 	
 		
-		__syncthreads(); //wait till all threads are done, then incremenet i, and syc again
-
+		
+		//no consistent view between thread blocks
 		if (threadIdx.x == 0) {
 			i++;
 
 		}
+		//make sure threads are on same iteration
 		__syncthreads();
 	}
 
-	if (threadIdx.x == 0) {
-		for (int i = 0; i < 15; i++) {
-			printf("in state %d, with setting %d\n", i, active[i]);
-		}
-		for (int i = 0; i < 15; i++) {
-			printf("state %d active count is %d\n", i, acceptCounts[i]);
-		}
-
-	}
+	//if (threadIdx.x == 0) {
+	//	for (int i = 0; i <= nfa->maxState; i++) {
+	//		printf("in state %d, with setting %d\n", i, active[i]);
+	//	}
+	//	for (int i = 0; i <= nfa->maxState; i++) {
+	//		printf("state %d active count is %d\n", i, acceptCounts[i]);
+	//	}
+	//
+	//}
 
 
 
 }
 
-void runInfant(INFANT* nfa, char* book, int bookLength, float* memoryTime, float* computationTime) {
+void runInfant(INFANT* nfa, char* book, int bookLength, float* memoryTime, float* computationTime, int blocks, int threadsPerBlock) {
 	int firsts[NFA_CHARS];
 	for (int i = 0; i < NFA_CHARS; i++) {
 		firsts[i] = nfa->transitions[i][0]; //copy first transitions to a list of first transitions
 	}
 
 
-	int blocks = 1;
-	int threadsPerBlock = 32;
+	
 
 	char* dev_book = nullptr;
 	INFANT* dev_nfa = nullptr;
-	
+
 
 	int* dev_counts = nullptr; //allocate active counter
-	cudaMalloc((void**)& dev_counts, 15 * sizeof(int));
-	cudaMemset(dev_counts, 0,15 * sizeof(int));
-
+	cudaMalloc((void**)& dev_counts, nfa->maxState * sizeof(int));
+	cudaMemset(dev_counts, 0, nfa->maxState * sizeof(int));
+	//counts for analysis 
+	int* counts = (int*)malloc(nfa->maxState * sizeof(int));
 
 	char current_states[MAX_STATES] = { 0 };
 	current_states[0] = 1;
@@ -321,11 +340,11 @@ void runInfant(INFANT* nfa, char* book, int bookLength, float* memoryTime, float
 	cudaMemcpy(dev_current_states, current_states, MAX_STATES * sizeof(char), cudaMemcpyHostToDevice);
 
 	char future_states[MAX_STATES] = { 0 };
-	
+
 
 	char* dev_future_states = nullptr; // allocate state array
 	cudaMalloc((void**)& dev_future_states, MAX_STATES * sizeof(char));
-	cudaMemcpy(dev_future_states,future_states, MAX_STATES * sizeof(char), cudaMemcpyHostToDevice);
+	cudaMemcpy(dev_future_states, future_states, MAX_STATES * sizeof(char), cudaMemcpyHostToDevice);
 
 
 	cudaEvent_t memoryStart, memoryStop; //track memory
@@ -339,7 +358,7 @@ void runInfant(INFANT* nfa, char* book, int bookLength, float* memoryTime, float
 
 	cudaMalloc((void**)& dev_nfa, 1 * sizeof(INFANT)); //allocate device memory
 	cudaMalloc((void**)& dev_book, bookLength * sizeof(char));
-	
+
 	cudaEventRecord(memoryStart); //record start of memory 
 
 	cudaMemcpy(dev_nfa, nfa, 1 * sizeof(INFANT), cudaMemcpyHostToDevice);
@@ -365,6 +384,12 @@ void runInfant(INFANT* nfa, char* book, int bookLength, float* memoryTime, float
 
 	printf("Memory Took: %f ms\n", *memoryTime);
 	printf("Computation Took: %f ms\n", *computationTime);
+
+	cudaMemcpy(counts, dev_counts, nfa->maxState * sizeof(int), cudaMemcpyDeviceToHost);
+	for (int i = 0; i < nfa->maxState; i++) {
+		printf("state %d count is %d\n", i, counts[i]);
+	}
+
 	//clean up
 	cudaFree(dev_book);
 	cudaFree(dev_nfa);
@@ -374,74 +399,124 @@ void runInfant(INFANT* nfa, char* book, int bookLength, float* memoryTime, float
 
 }
 
-int main()
-{
 
-	std::string s = loadBook("D:/CUDFA/CUDFA/x64/Debug/romeo_and_juliet.txt");
+
+void runExperiment(char* book_title, iNFAnt* automaton) {
+
+	std::string s = loadBook(book_title);
 	std::string* s2 = &s;
 	int char_count;
 	char* book = processBook(s2, &char_count);
-
-	iNFAnt* nfa = getiNFAnt();
-	
-	addTransition(nfa, 'a', 0, 0); //loop from 0 
-	addTransition(nfa, 'a', 1, 0); //from accept states move to reject when you see a
-	addTransition(nfa, 'a', 2, 0); //from accept states move to reject when you see a
-	
-
-
-	addTransition(nfa, 'b', 1, 1); //jump between accept states 
-	addTransition(nfa, 'b', 0, 1); //move to accept from sta
-	addTransition(nfa, 'b', 2, 1); //jump between accept states
-	
-	addTransition(nfa, 'c', 2, 2); //jump between accept states 
-	addTransition(nfa, 'c', 0, 2); //move to accept from sta
-	addTransition(nfa, 'c', 1, 2); //jump between accept states
-	//nfa->transitions['c' - FIRST_CHAR][0] = 0x00020002; // when you see b at state 2 loop
-	//nfa->transitions['c' - FIRST_CHAR][1] = 0x00000002; // when you see b at state 0 go to state 2
-	//nfa->transitions['c' - FIRST_CHAR][2] = 0x00010002;  // c at state 1 means go to state 2
-
-
-	//nfa->maxTransitions['a' - FIRST_CHAR] = 2;
-	//nfa->maxTransitions['b' - FIRST_CHAR] = 3;
-	//nfa->maxTransitions['c' - FIRST_CHAR] = 3;
-
-	char* str = "abaaaabc";
-
-	iNFAnt* nfa2 = getiNFAnt();
-
-	//romeos goes from 0 to 5
-	addTransition(nfa2, 'r', 0, 1);
-	addTransition(nfa2, 'o', 1, 2);
-	addTransition(nfa2, 'm', 2, 3);
-	addTransition(nfa2, 'e', 3, 4);
-	addTransition(nfa2, 'o', 4, 5);
-	
-	addTransition(nfa2, 'R', 0, 1);
-
-	addTransition(nfa2, 'j', 0, 6);
-	addTransition(nfa2, 'u', 6, 7);
-	addTransition(nfa2, 'l', 7, 8);
-	addTransition(nfa2, 'i', 8, 9);
-	addTransition(nfa2, 'e', 9, 10);
-	addTransition(nfa2, 't', 10, 11);
-	addTransition(nfa2, 'J', 0, 6);
-
-	nfa2->selfLoops[0] = 1; // self loop in first state
-
-	nfa2->acceptStates[5] = 1;
-	nfa2->acceptStates[11]  = 1;
 
 	float memoryTime;
 	float computationTime;
 	char* st = "romeo and juliet died";
 	//runInfant(nfa2, st, strlen(st), &memoryTime, &computationTime);
-	runInfant(nfa2, book, char_count, &memoryTime, &computationTime);
-	//runInfant(nfa, str, strlen(str), &memoryTime, &computationTime);
+	runInfant(automaton, book, char_count, &memoryTime, &computationTime, 1, 21);
+	printf("book is %d long\n", char_count);
+
+}
+
+int main()
+{
+
+	//std::string s = loadBook("D:/CUDFA/CUDFA/x64/Debug/romeo_and_juliet.txt");
+	//std::string* s2 = &s;
+	//int char_count;
+	//char* book = processBook(s2, &char_count);
+
+	//iNFAnt* nfa = getiNFAnt();
+	//
+	//addTransition(nfa, 'a', 0, 0); //loop from 0 
+	//addTransition(nfa, 'a', 1, 0); //from accept states move to reject when you see a
+	//addTransition(nfa, 'a', 2, 0); //from accept states move to reject when you see a
+	//
+	//
+	//
+	//addTransition(nfa, 'b', 1, 1); //jump between accept states 
+	//addTransition(nfa, 'b', 0, 1); //move to accept from sta
+	//addTransition(nfa, 'b', 2, 1); //jump between accept states
+	//
+	//addTransition(nfa, 'c', 2, 2); //jump between accept states 
+	//addTransition(nfa, 'c', 0, 2); //move to accept from sta
+	//addTransition(nfa, 'c', 1, 2); //jump between accept states
+	//
+	//
+	////char* str = "abaaaabc";
+	//
+	//iNFAnt* nfa2 = getiNFAnt();
+	//
+	////romeos goes from 0 to 5
+	////addTransition(nfa2, 'r', 0, 1);
+	////addTransition(nfa2, 'o', 1, 2);
+	////addTransition(nfa2, 'm', 2, 3);
+	////addTransition(nfa2, 'e', 3, 4);
+	////addTransition(nfa2, 'o', 4, 5);
+	//addString(nfa2, "romeo", 0);
+	//addTransition(nfa2, 'R', 0, 1);
+	//
+	//addTransition(nfa2, 'j', 0, 6);
+	//addString(nfa2, "uliet", 6);
+	////addTransition(nfa2, 'u', 6, 7);
+	////addTransition(nfa2, 'l', 7, 8);
+	////addTransition(nfa2, 'i', 8, 9);
+	////addTransition(nfa2, 'e', 9, 10);
+	////addTransition(nfa2, 't', 10, 11);
+	//addTransition(nfa2, 'J', 0, 6);
+	//addEpsilon(nfa2, 0, 12);
+	//
+	//int maxState = nfa2->maxState;
+	//
+	//addTransition(nfa2, 'C', 0, maxState+1);
+	//addString(nfa2, "apulet", maxState+1); //int check for max state
+	//maxState = nfa2->maxState;
+	//nfa2->acceptStates[maxState-1] = 1; //accept the string capulet
+	//
+	//nfa2->selfLoops[0] = 1; // self loop in first state
+	//
+	////now look for the word "the" followed by 1...10
+	//
+	//
+	//nfa2->acceptStates[5] = 1;
+	//nfa2->acceptStates[11]  = 1;
+	//nfa2->acceptStates[12] = 1;
+	//
+	//maxState = nfa2->maxState;
+	//int groupOfManyStart = maxState;
+	//addEpsilon(nfa2, 0, groupOfManyStart);
+	//addEpsilonString(nfa2, groupOfManyStart, 3);
+	//maxState = nfa2->maxState;
+	//int groupof3 = nfa2->maxState - 1;
+	//
+	//
+	//nfa2->acceptStates[maxState-1] = 1;
+	//
+	//
+	//
+	//
+	iNFAnt* experimentalNFA = getiNFAnt();
+	addEpsilon(experimentalNFA, 0, 0);//always loop beginning 
+
+	addString(experimentalNFA, "romeo", 0); //Look for romeo in all books, helps as debuggin sanity check
+	addTransition(experimentalNFA, 'R', 0, 1); //capital
+	
+	int romeoAccept = experimentalNFA->maxState;
+	experimentalNFA->acceptStates[romeoAccept] = 1; //accept romeo
+	//experimentalNFA->acceptStates[romeoAccept + 1] = 1; //count chars (6)
+	std::cout << "romeo accept state is " << romeoAccept << std::endl;
+	addTransition(experimentalNFA, 'O', 0, 7); //Now try OF THE
+	addTransition(experimentalNFA, 'o', 0, 7);
+	addString(experimentalNFA, "f the",7); //search for the string "of the"
+	int ofTheAccept = experimentalNFA->maxState;
+	experimentalNFA->acceptStates[ofTheAccept] = 1;
+	std::cout << "of the accept state is " << ofTheAccept << std::endl;
+	
+	
+	
+	experimentalNFA->maxState++;
 
 
-
-
+	runExperiment("D:/CUDFA/CUDFA/x64/Debug/romeo_and_juliet.txt", experimentalNFA);
 	getchar();
 	return 0;
 

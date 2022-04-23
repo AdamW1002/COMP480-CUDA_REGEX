@@ -29,8 +29,8 @@ void addTransition(iNFAnt* nfa, char c, short start, short end)
 	nfa->transitions[c - FIRST_CHAR][nfa->maxTransitions[c - FIRST_CHAR]] = *i; //add transition and then denote that maxtransitions increases
 	nfa->maxTransitions[c - FIRST_CHAR]++;
 	if (end > nfa->maxState || start > nfa->maxState) {
-	
-		if (end > start){
+
+		if (end > start) {
 			nfa->maxState = end;
 
 		}
@@ -39,5 +39,62 @@ void addTransition(iNFAnt* nfa, char c, short start, short end)
 		}
 
 	}
+}
+
+void addString(iNFAnt* nfa, char* str, int start){
+
+	
+	for (int i = 0; i < strlen(str); i++) { //for each char connect state to next
+		int state = start + i;
+		addTransition(nfa, str[i], state, state + 1);
+		
+	}
+	
+}
+
+void addEpsilon(iNFAnt* nfa, int start, int end){
+
+	for (char c = FIRST_CHAR; c < FIRST_CHAR + NFA_CHARS; c++) {
+		addTransition(nfa, c, start, end);
+	}
+
+}
+
+int addEpsilonString(iNFAnt* nfa, int start, int count){
+	int state;
+	for (int i = 0; i < count; i++) {
+		addEpsilon(nfa, start + i, start + i + 1);
+		state = start + i + 1;
+		if (state > nfa->maxState || start > nfa->maxState) {
+
+			if (state > start) {
+				nfa->maxState = state;
+
+			}
+			else {
+				nfa->maxState = start;
+			}
+
+		}
+	}
+
+	return state;
+}
+
+void addGroupOfMany(iNFAnt* nfa, int start, int min, int max, int* end){
+	int initial = nfa->maxState + 1; //first unused state
+	addEpsilon(nfa, start, initial);
+	for (int i = min; i < max; i++) { //go thru range
+		int* endPoints = (int*) malloc((max-min) * sizeof(int)); //store where we end
+		for (int j = 1; j < max - min; j++) {
+			
+			for (int k = 0; k < j; k++) {
+			
+			}
+
+		}
+	
+	}
+
 }
 
