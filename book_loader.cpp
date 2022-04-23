@@ -4,7 +4,7 @@
 #include <string>
 #include <sstream>
 
-std::string loadBook(char * filename)
+std::string loadBook( const char * filename)
 {
 	std::ifstream file;
 	file.open(filename);

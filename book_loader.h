@@ -3,5 +3,5 @@
 #include <fstream>
 #include <string>
 
-std::string loadBook(char* filename);
+std::string loadBook(const char* filename);
 char* processBook(std::string* book, int* len);
